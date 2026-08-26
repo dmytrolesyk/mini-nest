@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Container, injectable, inject } from './index.js';
+import { Container, injectable, inject } from '../src/index.js';
 
 describe('resolving a simple graph', () => {
   @injectable()
@@ -122,11 +122,6 @@ describe('@inject with a token', () => {
 });
 
 describe('circular dependencies', () => {
-  // Both sides are declared with interface-typed parameters and resolved by
-  // token. A direct `constructor(b: B)` / `constructor(a: A)` pair cannot be
-  // written: emitDecoratorMetadata evaluates the class reference when the
-  // decorator runs, so whichever class is declared first would hit a TDZ
-  // ReferenceError before the container ever sees it.
   interface IServiceA {}
   interface IServiceB {}
 

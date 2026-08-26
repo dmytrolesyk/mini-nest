@@ -10,10 +10,10 @@ from scratch.
 pnpm add @dmytrolesyk/custom-nest reflect-metadata
 ```
 
-`reflect-metadata` is a peer dependency: the metadata registry must be a single
-global instance, so the container cannot bring its own copy.
+`reflect-metadata` is a peer dependency: the metadata registry has to be a
+single global instance, so the container cannot bring its own copy.
 
-Your `tsconfig.json` needs both decorator flags:
+Both decorator flags are required in the consuming project:
 
 ```json
 {
@@ -23,6 +23,27 @@ Your `tsconfig.json` needs both decorator flags:
   }
 }
 ```
+
+## Run
+
+```sh
+pnpm install
+pnpm test:src          # tests straight from TypeScript, no build
+pnpm build:test        # compile sources + tests to dist-test/
+pnpm test              # run the compiled tests
+pnpm build             # compile the publishable library to dist/
+pnpm typecheck
+```
+
+In Docker:
+
+```sh
+docker compose run --rm api npm test
+```
+
+The image is built in two stages: a builder that installs the full toolchain
+and compiles TypeScript, and a test stage holding only the emitted JavaScript
+plus `reflect-metadata`.
 
 ## Quick start
 
@@ -42,8 +63,60 @@ const car = new Container().get(Car) as Car;
 car.engine instanceof Engine; // true
 ```
 
-Classes marked `@injectable()` are auto-bound on first resolve, so a graph of
-concrete classes needs no registration at all.
+Classes marked `@injectable()` are auto-bound the first time they are resolved,
+so a graph of concrete classes needs no registration at all.
+
+## Як це працює
+
+Контейнер нічого не вгадує — він читає метадані, які **TypeScript сам** кладе
+на клас під час компіляції.
+
+Коли до класу застосовано будь-який декоратор і увімкнено
+`emitDecoratorMetadata`, компілятор дописує до емітованого коду виклик
+`Reflect.metadata('design:paramtypes', [...])` зі списком типів параметрів
+конструктора. Тобто для
+
+```ts
+@injectable()
+class Car {
+  constructor(engine: Engine) {}
+}
+```
+
+у JavaScript опиняється `design:paramtypes = [Engine]` — посилання на **сам
+конструктор** `Engine`, а не на рядок з назвою типу. Контейнер дістає цей масив
+через `Reflect.getMetadata('design:paramtypes', Car)`, рекурсивно резолвить
+кожен елемент і викликає `new Car(...залежності)`.
+
+Два наслідки, які пояснюють решту API:
+
+**Без `emitDecoratorMetadata` не працює нічого.** Прапорець вимкнено —
+компілятор не емітує `design:paramtypes`, `Reflect.getMetadata` повертає
+`undefined`, контейнер бачить порожній список залежностей і викликає
+`new Car()` без аргументів. Помилки не буде: ви просто отримаєте об'єкт, у
+якого всі залежності `undefined`. Так само й з класом **без жодного
+декоратора** — метадані емітуються тільки для декорованих класів, тому
+`@injectable()` потрібен ще й як тригер емісії.
+
+**Не кожен тип переживає компіляцію.** Інтерфейси в рантаймі не існують, і
+замість інтерфейсу компілятор запише `Object`; примітиви стають `String`,
+`Number`, `Boolean`. Резолвити такі «типи» немає сенсу, тому для них потрібен
+явний токен через `@inject(token)` — див. нижче.
+
+Сам `@injectable()` — це буквально два рядки:
+
+```ts
+export function injectable(): ClassDecorator {
+  return target => {
+    Reflect.defineMetadata(INJECTABLE, true, target);
+  };
+}
+```
+
+Перевіряється він через `hasOwnMetadata`, а не `hasMetadata`: позначення має
+бути явним, інакше недекорований нащадок успадкував би прапорець від батька.
+`design:paramtypes`, навпаки, читається успадковано — нащадок без власного
+конструктора справді використовує батьківський.
 
 ## Tokens
 
@@ -60,6 +133,9 @@ class Repo {
 
 container.bind(LOGGER).to(ConsoleLogger);
 ```
+
+`@inject` stores a map of parameter index to identifier under its own metadata
+key, which the container layers over `design:paramtypes` when resolving.
 
 The same applies to primitives — `damage: number` emits `Number`, which the
 container refuses to construct.
@@ -94,7 +170,7 @@ A cycle throws with the full chain rather than overflowing the stack:
 [ResolutionError] circular dependencies detected A -> B -> A
 ```
 
-Diamonds are not cycles — a dependency reached twice by different paths
+Diamonds are not cycles — a dependency reached twice along different paths
 resolves normally.
 
 ## Options
@@ -103,8 +179,19 @@ resolves normally.
 new Container({ autobind: false });
 ```
 
-With `autobind` disabled, every identifier must be bound explicitly before it
+With `autobind` disabled every identifier must be bound explicitly before it
 can be resolved.
+
+## Project layout
+
+```
+src/decorators/injectable.ts   @injectable()
+src/decorators/inject.ts       @inject(token) and design:paramtypes reading
+src/container.ts               the container itself
+src/tokens.ts                  metadata key symbols
+src/types.ts                   shared types
+test/                          tests
+```
 
 ## License
 

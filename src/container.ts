@@ -1,4 +1,5 @@
-import 'reflect-metadata';
+import { getParamTypes } from './decorators/inject.js';
+import { isInjectable } from './decorators/injectable.js';
 import {
   BindingScope,
   ContainerOptions,
@@ -7,11 +8,6 @@ import {
   isNewable,
   Newable,
 } from './types.js';
-
-const INJECTABLE = Symbol.for('injectable_service');
-
-const PARAM_TYPES_METADATA = 'design:paramtypes';
-const CUSTOM_PARAM_TYPES_METADATA = 'custom:design:paramtypes';
 
 class ResolutionError extends Error {
   constructor(type: 'circular_deps' | 'missing_binding', deps?: EntityIdentifier[]) {
@@ -28,45 +24,6 @@ class InjectableError extends Error {
     super(`Target ${entityName} is not marked as @injectable`);
   }
 }
-
-export function injectable(): ClassDecorator {
-  return target => {
-    Reflect.defineMetadata(INJECTABLE, true, target);
-  };
-}
-
-function isInjectable(target: EntityIdentifier) {
-  return Reflect.hasOwnMetadata(INJECTABLE, target);
-}
-
-export function inject(entityIdentifer: EntityIdentifier): ParameterDecorator {
-  return (target, _propertyKey, parameterIndex) => {
-    const existingCustomMetadata = Reflect.getOwnMetadata(CUSTOM_PARAM_TYPES_METADATA, target);
-    Reflect.defineMetadata(
-      CUSTOM_PARAM_TYPES_METADATA,
-      Object.assign({}, existingCustomMetadata, { [parameterIndex]: entityIdentifer }),
-      target,
-    );
-  };
-}
-
-const getParamTypes = (entity: Newable): EntityIdentifier[] => {
-  const paramTypes = Reflect.getMetadata(PARAM_TYPES_METADATA, entity) as
-    | EntityIdentifier[]
-    | undefined;
-  const customParamTypes = Reflect.getMetadata(CUSTOM_PARAM_TYPES_METADATA, entity) as
-    | Record<number, EntityIdentifier>
-    | undefined;
-
-  return (
-    paramTypes?.map((paramType, i) => {
-      if (customParamTypes && customParamTypes[i]) {
-        return customParamTypes[i];
-      }
-      return paramType;
-    }) ?? []
-  );
-};
 
 class DependencyBinding<T = unknown> {
   readonly entityIdentifier: EntityIdentifier<T>;
