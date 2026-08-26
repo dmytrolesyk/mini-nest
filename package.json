@@ -10,13 +10,13 @@
     "decorators",
     "reflect-metadata"
   ],
-  "homepage": "https://github.com/dmytrolesyk/custom-nest#readme",
+  "homepage": "https://github.com/dmytrolesyk/mini-nest#readme",
   "bugs": {
-    "url": "https://github.com/dmytrolesyk/custom-nest/issues"
+    "url": "https://github.com/dmytrolesyk/mini-nest/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dmytrolesyk/custom-nest.git"
+    "url": "git+https://github.com/dmytrolesyk/mini-nest.git"
   },
   "license": "ISC",
   "author": "Dmytro Lesyk",
