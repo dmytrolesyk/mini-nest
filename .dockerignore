@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+.prettierrc
+.vscode
+
+# Not needed inside the image they build
+*.Dockerfile
+compose.yaml

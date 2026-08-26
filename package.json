@@ -15,9 +15,10 @@
   "author": "Dmytro Lesyk",
   "main": "index.ts",
   "scripts": {
-    "test": "node --require ts-node/register --test \"*.test.ts\"",
-    "typecheck": "tsc --noEmit",
-    "demo": "ts-node test.ts"
+    "build": "tsc",
+    "test": "node --test \"dist/*.test.js\"",
+    "test:src": "node --require ts-node/register --test \"*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "packageManager": "pnpm@10.24.0",
   "dependencies": {

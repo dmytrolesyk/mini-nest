@@ -1,0 +1,7 @@
+services:
+  api:
+    image: custom-nest:test
+    build:
+      context: .
+      dockerfile: node.Dockerfile
+      target: test
