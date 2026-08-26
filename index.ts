@@ -1,1 +1,1 @@
-export { Container, inject, injectable } from './lib/ioc';
+export { Container, inject, injectable } from './lib/ioc.js';

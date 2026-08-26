@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Container, injectable, inject } from './index.ts';
+import { Container, injectable, inject } from './index.js';
 
 describe('resolving a simple graph', () => {
   @injectable()

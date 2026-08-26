@@ -6,7 +6,7 @@ import {
   EntityIdentifier,
   isNewable,
   Newable,
-} from './types.ts';
+} from './types.js';
 
 const INJECTABLE = Symbol.for('injectable_service');
 
