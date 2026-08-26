@@ -1,0 +1,30 @@
+{
+  "name": "custom-nest",
+  "version": "1.0.0",
+  "description": "ioc-container",
+  "keywords": [],
+  "homepage": "https://github.com/dmytrolesyk/custom-nest#readme",
+  "bugs": {
+    "url": "https://github.com/dmytrolesyk/custom-nest/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmytrolesyk/custom-nest.git"
+  },
+  "license": "ISC",
+  "author": "Dmytro Lesyk",
+  "main": "index.js",
+  "scripts": {
+    "test": "ts-node test.ts"
+  },
+  "packageManager": "pnpm@10.24.0",
+  "dependencies": {
+    "inversify": "^8.2.3",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
