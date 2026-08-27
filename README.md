@@ -28,12 +28,13 @@ Both decorator flags are required in the consuming project:
 
 ```sh
 pnpm install
-pnpm test:src          # tests straight from TypeScript, no build
-pnpm build:test        # compile sources + tests to dist-test/
-pnpm test              # run the compiled tests
+pnpm test              # compile to dist-test/ and run the tests
 pnpm build             # compile the publishable library to dist/
 pnpm typecheck
 ```
+
+`pnpm test` compiles first, so it works on a fresh clone. `npm test` does the
+same thing.
 
 In Docker:
 
@@ -41,9 +42,8 @@ In Docker:
 docker compose run --rm api npm test
 ```
 
-The image is built in two stages: a builder that installs the full toolchain
-and compiles TypeScript, and a test stage holding only the emitted JavaScript
-plus `reflect-metadata`.
+The image is built in two stages: a builder that installs dependencies and
+compiles TypeScript, and a test stage that runs the suite.
 
 ## Quick start
 
@@ -65,6 +65,29 @@ car.engine instanceof Engine; // true
 
 Classes marked `@injectable()` are auto-bound the first time they are resolved,
 so a graph of concrete classes needs no registration at all.
+
+## Scopes
+
+| scope | behaviour |
+| --- | --- |
+| `singleton` | default — one instance per container |
+| `transient` | a new instance on every resolve |
+
+Declare the scope on the class:
+
+```ts
+@injectable({ scope: 'transient' })
+class RequestContext {}
+```
+
+That scope is used whether the class is auto-bound or bound explicitly. A
+binding can still override it:
+
+```ts
+container.bind(RequestContext).setScope('singleton').toSelf();
+```
+
+Singletons are cached per container, not globally.
 
 ## Як це працює
 
@@ -106,12 +129,15 @@ class Car {
 Сам `@injectable()` — це буквально два рядки:
 
 ```ts
-export function injectable(): ClassDecorator {
+export function injectable(options: InjectableOptions = {}): ClassDecorator {
   return target => {
-    Reflect.defineMetadata(INJECTABLE, true, target);
+    Reflect.defineMetadata(INJECTABLE, options, target);
   };
 }
 ```
+
+Аргумент декоратора зберігається там само, тож `@injectable({ scope:
+'transient' })` читається контейнером у момент створення біндингу.
 
 Перевіряється він через `hasOwnMetadata`, а не `hasMetadata`: позначення має
 бути явним, інакше недекорований нащадок успадкував би прапорець від батька.
@@ -150,17 +176,8 @@ container.bind(Token).setScope('transient').to(Impl);
 container.unbind(Token);                         // also drops the cached singleton
 ```
 
-`bind()` returns a builder; the terminal call registers the binding. Set the
-scope before choosing a target.
-
-## Scopes
-
-| scope | behaviour |
-| --- | --- |
-| `singleton` | default — one instance per container |
-| `transient` | a new instance on every resolve |
-
-Singletons are cached per container, not globally.
+`bind()` returns a builder; the terminal call registers the binding. `setScope`
+overrides whatever the class declared, so call it before choosing a target.
 
 ## Circular dependencies
 

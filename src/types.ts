@@ -6,6 +6,8 @@ export type EntityIdentifier<TInstance = unknown> = string | symbol | Newable<TI
 
 export type BindingScope = 'singleton' | 'transient';
 
+export type InjectableOptions = { scope?: BindingScope };
+
 export type ContainerOptions = { autobind: boolean };
 
 export function isNewable(entity: EntityIdentifier): entity is Newable {

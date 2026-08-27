@@ -10,8 +10,10 @@ RUN pnpm build:test
 FROM node:24-slim AS test
 
 WORKDIR /app
-COPY package.json ./
-COPY --from=builder /build/node_modules/reflect-metadata ./node_modules/reflect-metadata
+RUN corepack enable
+COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/dist-test ./dist-test
-USER node
+COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.build.json ./
+COPY src ./src
+COPY test ./test
 CMD ["npm", "test"]

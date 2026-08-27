@@ -1,5 +1,5 @@
 import { getParamTypes } from './decorators/inject.js';
-import { isInjectable } from './decorators/injectable.js';
+import { getDeclaredScope, isInjectable } from './decorators/injectable.js';
 import {
   BindingScope,
   ContainerOptions,
@@ -42,11 +42,14 @@ class DependencyBinding<T = unknown> {
 
 class DependencyBindingBuilder<T = unknown> {
   private entityIdentifier: EntityIdentifier<T> | null = null;
-  private scope: BindingScope = 'singleton';
+  private scope: BindingScope | null = null;
   private dependency: Dependency<T> | null = null;
   private readonly onBindingConstructed: (binding: DependencyBinding) => void;
   constructor(onBindingConstructed: (binding: DependencyBinding) => void) {
     this.onBindingConstructed = onBindingConstructed;
+  }
+  private scopeFor(entity: EntityIdentifier): BindingScope {
+    return this.scope ?? getDeclaredScope(entity) ?? 'singleton';
   }
   bind(entityIdentifier: EntityIdentifier<T>) {
     this.entityIdentifier = entityIdentifier;
@@ -58,7 +61,7 @@ class DependencyBindingBuilder<T = unknown> {
       entity: entity,
       type: 'newable',
     };
-    const binding = new DependencyBinding<T>(this.entityIdentifier, this.dependency, this.scope);
+    const binding = new DependencyBinding<T>(this.entityIdentifier, this.dependency, this.scopeFor(entity));
     this.onBindingConstructed(binding);
   }
   toSelf() {
@@ -70,7 +73,11 @@ class DependencyBindingBuilder<T = unknown> {
       entity: this.entityIdentifier,
       type: 'newable',
     };
-    const binding = new DependencyBinding(this.entityIdentifier, this.dependency, this.scope);
+    const binding = new DependencyBinding(
+      this.entityIdentifier,
+      this.dependency,
+      this.scopeFor(this.entityIdentifier),
+    );
     this.onBindingConstructed(binding);
   }
   toConstantValue(value: T) {
@@ -79,7 +86,11 @@ class DependencyBindingBuilder<T = unknown> {
       entity: value,
       type: 'constant',
     };
-    const binding = new DependencyBinding(this.entityIdentifier, this.dependency, this.scope);
+    const binding = new DependencyBinding(
+      this.entityIdentifier,
+      this.dependency,
+      this.scope ?? 'singleton',
+    );
     this.onBindingConstructed(binding);
   }
   setScope(scope: BindingScope) {

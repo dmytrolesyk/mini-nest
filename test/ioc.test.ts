@@ -77,6 +77,51 @@ describe('scopes', () => {
     assert.notEqual(container.get(Service), container.get(Service));
   });
 
+  it('honours a transient scope declared on the decorator when autobinding', () => {
+    @injectable({ scope: 'transient' })
+    class Fresh {}
+
+    const container = new Container();
+
+    assert.notEqual(container.get(Fresh), container.get(Fresh));
+  });
+
+  it('honours a declared scope through an explicit binding too', () => {
+    @injectable({ scope: 'transient' })
+    class Fresh {}
+
+    const container = new Container();
+    container.bind(Fresh).toSelf();
+
+    assert.notEqual(container.get(Fresh), container.get(Fresh));
+  });
+
+  it('lets setScope override what the decorator declared', () => {
+    @injectable({ scope: 'transient' })
+    class Fresh {}
+
+    const container = new Container();
+    container.bind(Fresh).setScope('singleton').toSelf();
+
+    assert.equal(container.get(Fresh), container.get(Fresh));
+  });
+
+  it('propagates a declared transient scope to a dependency', () => {
+    @injectable({ scope: 'transient' })
+    class Fresh {}
+
+    @injectable()
+    class Holder {
+      constructor(readonly fresh: Fresh) {}
+    }
+
+    const container = new Container();
+    const first = container.get(Holder) as Holder;
+    container.unbind(Holder);
+
+    assert.notEqual(first.fresh, (container.get(Holder) as Holder).fresh);
+  });
+
   it('keeps singletons scoped per container, not globally', () => {
     assert.notEqual(new Container().get(Service), new Container().get(Service));
   });
