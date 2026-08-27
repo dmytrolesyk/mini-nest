@@ -1,0 +1,58 @@
+{
+  "name": "@dmytrolesyk/custom-nest",
+  "version": "0.1.0",
+  "description": "A minimal IoC container with decorator-driven constructor injection",
+  "keywords": [
+    "ioc",
+    "di",
+    "dependency-injection",
+    "container",
+    "decorators",
+    "reflect-metadata"
+  ],
+  "homepage": "https://github.com/dmytrolesyk/mini-nest#readme",
+  "bugs": {
+    "url": "https://github.com/dmytrolesyk/mini-nest/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmytrolesyk/mini-nest.git"
+  },
+  "license": "ISC",
+  "author": "Dmytro Lesyk",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build:test": "rm -rf dist-test && tsc",
+    "test": "pnpm build:test && node --test \"dist-test/test/*.test.js\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm test && pnpm build"
+  },
+  "packageManager": "pnpm@10.24.0",
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "reflect-metadata": "^0.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "reflect-metadata": "^0.2.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
