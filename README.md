@@ -144,6 +144,34 @@ export function injectable(options: InjectableOptions = {}): ClassDecorator {
 `design:paramtypes`, навпаки, читається успадковано — нащадок без власного
 конструктора справді використовує батьківський.
 
+## HTTP-шар
+
+`Factory.create([AppModule])` піднімає `node:http`-сервер поверх контейнера з частини 1.
+
+Маршрути збирає `src/router.ts`: він проходить модулі, читає `@Controller(prefix)` з класу
+та список маршрутів із прототипу, просить контейнер створити екземпляр контролера і склеює
+повний шлях із префікса контролера та шляху методу. Зіставлення робить `URLPattern`, тому
+`:id` у шляху стає іменованою групою. Роутер нічого не знає про `req`/`res` — його можна
+тестувати без сервера.
+
+`src/dispatcher.ts` відповідає лише за HTTP: парсить тіло, питає роутер про збіг, збирає
+масив аргументів, проганяє DTO через `ValidationPipe` і серіалізує результат у JSON.
+
+### Як параметр-декоратор знає, куди підставити значення
+
+Параметр-декоратор отримує `(target, propertyKey, parameterIndex)` — і саме `parameterIndex`
+є ключем. `@Param('id')`, `@Query('limit')` та `@Body()` нічого не витягують самі: вони лише
+записують у метадані прототипу контролера мапу
+`{ [methodName]: { [parameterIndex]: { type, key } } }`.
+
+Під час запиту диспетчер бере цю мапу для знайденого обробника і будує масив аргументів за
+індексами: для `param` — значення з груп `URLPattern`, для `query` — з `searchParams`, для
+`body` — розпарсене тіло. Який саме клас DTO очікує метод, диспетчер дізнається з
+`design:paramtypes`, що його `emitDecoratorMetadata` записує для цього методу. Тому
+`@Body() dto: CreateUserDto` спершу проходить через `plainToInstance`, а потім через
+`class-validator`; якщо є помилки — відповідь `400` зі списком `[{ field, constraints }]`,
+інакше в метод приходить уже екземпляр DTO.
+
 ## Tokens
 
 TypeScript erases interfaces, so an interface-typed parameter emits `Object`
@@ -202,10 +230,16 @@ can be resolved.
 ## Project layout
 
 ```
-src/decorators/injectable.ts   @injectable()
-src/decorators/inject.ts       @inject(token) and design:paramtypes reading
-src/container.ts               the container itself
-src/tokens.ts                  metadata key symbols
+src/ioc/                       the IoC container from part 1
+src/decorators/controller.ts   @Controller(prefix)
+src/decorators/methods.ts      @Get / @Post / ...
+src/decorators/params.ts       @Body, @Param, @Query
+src/decorators/module.ts       @Module({ controllers })
+src/decorators/helpers.ts      composeClassDecorators
+src/router.ts                  route table and URLPattern matching
+src/dispatcher.ts              node:http layer
+src/pipes/validation.pipe.ts   DTO validation
+src/dto/create-user.dto.ts     DTO with class-validator rules
 src/types.ts                   shared types
 test/                          tests
 ```

@@ -10,6 +10,7 @@
     "decorators",
     "reflect-metadata"
   ],
+  "type": "module",
   "homepage": "https://github.com/dmytrolesyk/mini-nest#readme",
   "bugs": {
     "url": "https://github.com/dmytrolesyk/mini-nest/issues"
@@ -25,6 +26,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "build:test": "rm -rf dist-test && tsc",
     "test": "pnpm build:test && node --test \"dist-test/test/*.test.js\"",
+    "dev": "tsc -p tsconfig.dev.json && (tsc -p tsconfig.dev.json --watch --preserveWatchOutput & node --watch dist-dev/app.js)",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm test && pnpm build"
   },
@@ -47,12 +49,16 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "peerDependencies": {
     "reflect-metadata": "^0.2.2"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1"
   }
 }
