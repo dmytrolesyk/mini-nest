@@ -49,6 +49,10 @@ const CONTENT_TYPES_MAP = {
   bin: 'application/octet-stream',
 } as const;
 
+const BODYLESS_METHODS = ['GET', 'HEAD'];
+
+export class BadRequestError extends Error {}
+
 async function readRawBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -58,18 +62,21 @@ async function readRawBody(request: IncomingMessage): Promise<Buffer> {
 }
 
 async function parseBody(request: IncomingMessage): Promise<RequestBody> {
-  const contentType = request.headers['content-type'];
-  const contentLength = request.headers['content-length'];
-  if (contentLength && contentType) {
-    const rawBody = await readRawBody(request);
-    if (contentType.startsWith(CONTENT_TYPES_MAP.json)) {
+  if (BODYLESS_METHODS.includes(request.method ?? 'GET')) return;
+  const rawBody = await readRawBody(request);
+  if (rawBody.length === 0) return;
+  const contentType = request.headers['content-type'] ?? '';
+  if (contentType.startsWith(CONTENT_TYPES_MAP.json)) {
+    try {
       return JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      throw new BadRequestError('Malformed JSON body');
     }
-    if (contentType.startsWith(CONTENT_TYPES_MAP.urlEncoded)) {
-      return new URLSearchParams(rawBody.toString('utf8'));
-    }
-    return rawBody.toString('utf8');
   }
+  if (contentType.startsWith(CONTENT_TYPES_MAP.urlEncoded)) {
+    return new URLSearchParams(rawBody.toString('utf8'));
+  }
+  return rawBody.toString('utf8');
 }
 
 const send = (res: ServerResponse, status: number, payload: unknown) => {
@@ -102,26 +109,45 @@ const buildArguments = async (matched: MatchedRoute, query: URLSearchParams, bod
   return { args, errors };
 };
 
+type RequestContext = {
+  method: string;
+  url: URL;
+  request: IncomingMessage;
+  router: Router;
+};
+
+type HandlerResponse = { status: number; payload: unknown };
+
+const execute = async (context: RequestContext): Promise<HandlerResponse> => {
+  const { method, url, request, router } = context;
+  const matched = router.match(method, url.pathname);
+  if (!matched) {
+    return { status: 404, payload: { message: `Cannot ${method} ${url.pathname}` } };
+  }
+  const body = await parseBody(request);
+  const { args, errors } = await buildArguments(matched, url.searchParams, body);
+  if (errors.length > 0) {
+    return { status: 400, payload: { message: 'Validation failed', errors } };
+  }
+  const result = await matched.route.instance[matched.route.handler](...args);
+  return { status: method === 'POST' ? 201 : 200, payload: result };
+};
+
 export class Factory {
   static create(modules: Newable[]): App {
     const container = new Container();
     const router = new Router(modules, container);
     const server = http.createServer(async (req, res) => {
       const { method = 'GET', url = '/' } = req;
-      const requestUrl = new URL(url, 'http://localhost');
-      const matched = router.match(method, requestUrl.pathname);
-      if (!matched) {
-        return send(res, 404, { message: `Cannot ${method} ${requestUrl.pathname}` });
-      }
+      const context = { method, url: new URL(url, 'http://localhost'), request: req, router };
       try {
-        const body = await parseBody(req);
-        const { args, errors } = await buildArguments(matched, requestUrl.searchParams, body);
-        if (errors.length > 0) {
-          return send(res, 400, { message: 'Validation failed', errors });
+        const { status, payload } = await execute(context);
+        send(res, status, payload);
+      } catch (error) {
+        if (error instanceof BadRequestError) {
+          return send(res, 400, { message: error.message });
         }
-        const result = await matched.route.instance[matched.route.handler](...args);
-        send(res, method === 'POST' ? 201 : 200, result);
-      } catch {
+        console.error(error);
         send(res, 500, { message: 'Internal Server Error' });
       }
     });

@@ -115,6 +115,36 @@ describe('validation', () => {
   });
 });
 
+describe('request body', () => {
+  it('reads a chunked body that carries no Content-Length', async () => {
+    const payload = JSON.stringify({ name: 'Solaire', email: 'solaire@example.com', age: 30 });
+    const response = await fetch(`${baseUrl}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(payload));
+          controller.close();
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit);
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), { isDto: true, name: 'Solaire' });
+  });
+
+  it('answers 400 rather than 500 when the JSON body is malformed', async () => {
+    const response = await fetch(`${baseUrl}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"name":"x",,,}',
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
 describe('container integration', () => {
   it('injects the singleton the container resolves', () => {
     const controller = app.container.get(UsersController);
