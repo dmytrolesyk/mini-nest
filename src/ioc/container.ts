@@ -1,13 +1,13 @@
-import { getParamTypes } from './decorators/inject.js';
-import { getDeclaredScope, isInjectable } from './decorators/injectable.js';
+import { getParamTypes } from './decorators/inject.ts';
+import { getDeclaredScope, isInjectable } from './decorators/injectable.ts';
 import {
-  BindingScope,
-  ContainerOptions,
-  Dependency,
-  EntityIdentifier,
+  type BindingScope,
+  type ContainerOptions,
+  type Dependency,
+  type EntityIdentifier,
   isNewable,
-  Newable,
-} from './types.js';
+  type Newable,
+} from './decorators/types.ts';
 
 class ResolutionError extends Error {
   constructor(type: 'circular_deps' | 'missing_binding', deps?: EntityIdentifier[]) {
@@ -61,7 +61,11 @@ class DependencyBindingBuilder<T = unknown> {
       entity: entity,
       type: 'newable',
     };
-    const binding = new DependencyBinding<T>(this.entityIdentifier, this.dependency, this.scopeFor(entity));
+    const binding = new DependencyBinding<T>(
+      this.entityIdentifier,
+      this.dependency,
+      this.scopeFor(entity),
+    );
     this.onBindingConstructed(binding);
   }
   toSelf() {
@@ -152,8 +156,8 @@ export class Container {
     }
     throw new ResolutionError('missing_binding');
   }
-  get(entityIdentifier: EntityIdentifier): unknown {
-    return this.resolve(entityIdentifier);
+  get<T>(entityIdentifier: EntityIdentifier<T>): T {
+    return this.resolve(entityIdentifier) as T;
   }
   bind<T>(entityIdentifier: EntityIdentifier<T>) {
     if (this.bindings.has(entityIdentifier)) {

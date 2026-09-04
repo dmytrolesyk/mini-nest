@@ -1,5 +1,5 @@
-import { INJECTABLE } from '../tokens.js';
-import { BindingScope, EntityIdentifier, InjectableOptions } from '../types.js';
+import { INJECTABLE } from './tokens.ts';
+import type { BindingScope, EntityIdentifier, InjectableOptions } from './types.ts';
 
 export function injectable(options: InjectableOptions = {}): ClassDecorator {
   return target => {

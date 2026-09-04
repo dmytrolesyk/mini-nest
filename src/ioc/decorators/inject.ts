@@ -1,5 +1,5 @@
-import { CUSTOM_PARAM_TYPES_METADATA, PARAM_TYPES_METADATA } from '../tokens.js';
-import { EntityIdentifier, Newable } from '../types.js';
+import { CUSTOM_PARAM_TYPES_METADATA, PARAM_TYPES_METADATA } from './tokens.ts';
+import type { EntityIdentifier, Newable } from './types.ts';
 
 export function inject(entityIdentifer: EntityIdentifier): ParameterDecorator {
   return (target, _propertyKey, parameterIndex) => {
