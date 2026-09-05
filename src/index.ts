@@ -18,6 +18,6 @@ export { Body, Param, Query } from './decorators/params.ts';
 export { ValidationPipe, needsValidation } from './pipes/validation.pipe.ts';
 export type { ValidationError, ValidationResult } from './pipes/validation.pipe.ts';
 export { Router } from './router.ts';
-export type { MatchedRoute, RouteEntry } from './router.ts';
-export { Factory } from './dispatcher.ts';
+export type { MatchedRoute } from './router.ts';
+export { AppFactory } from './app-factory.ts';
 export type { HttpMethod, Path, RequestBody } from './types.ts';

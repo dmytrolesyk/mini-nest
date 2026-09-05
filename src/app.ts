@@ -5,7 +5,7 @@ import { Get, Post } from './decorators/methods.ts';
 import { Module } from './decorators/module.ts';
 import { Body, Param, Query } from './decorators/params.ts';
 import { CreateUserDto } from './dto/create-user.dto.ts';
-import { Factory } from './dispatcher.ts';
+import { AppFactory } from './app-factory.ts';
 
 type User = { id: number } & CreateUserDto;
 
@@ -54,4 +54,6 @@ class UsersController {
 @Module({ controllers: [UsersController] })
 class AppModule {}
 
-Factory.create([AppModule]).listen(3000);
+AppFactory.create([AppModule]).listen(3000, () => {
+  console.log('app started');
+});

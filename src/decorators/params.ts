@@ -2,7 +2,7 @@ export const PARAMS_METADATA_TOKEN = Symbol.for('metadata:params');
 
 type MethodName = string | symbol;
 
-type ParameterIndex = number;
+export type ParameterIndex = number;
 
 export type ParamType = 'param' | 'body' | 'query';
 
