@@ -42,6 +42,14 @@ export type OptionalCallback = (() => void) | undefined;
 
 export type PathParams = Record<string, string | undefined>;
 
+export type MatchedRoute = { route: Route; pathParams: PathParams };
+
+export type Route = {
+  handler: (ctx: HttpExecutionContext) => unknown;
+  pattern: URLPattern;
+  method: HttpMethod;
+};
+
 export type HttpExecutionContext = {
   method: HttpMethod;
   url: URL;

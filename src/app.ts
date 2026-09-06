@@ -86,6 +86,10 @@ class AppModule implements MiniNestModule {
   }
 }
 
-AppFactory.create(AppModule).listen(3000, () => {
+const app = AppFactory.create(AppModule);
+
+app.enableShutdownHooks();
+
+app.listen(3000, () => {
   console.log('app started');
 });

@@ -128,7 +128,12 @@ export class HttpServer {
     this.server.listen(port, callback);
   }
   close(callback: OptionalCallback) {
+    const GRACE_PERIOD = 5000;
+    const forceCloseConnections = setTimeout(() => {
+      this.server.closeAllConnections();
+    }, GRACE_PERIOD);
     this.server.close(callback);
+    forceCloseConnections.unref();
   }
   private async parseBody(request: IncomingMessage): Promise<RequestBody> {
     if (BODYLESS_METHODS.includes(request.method ?? 'GET')) return;

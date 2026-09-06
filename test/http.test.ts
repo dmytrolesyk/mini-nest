@@ -17,7 +17,7 @@ import {
   injectable,
 } from '../src/index.ts';
 import type { FieldError } from '../src/index.ts';
-import { RouteExplorer } from '../src/router.ts';
+import { RouteExplorer } from '../src/route-explorer.ts';
 import { CreateUserSchema } from '../src/dto/create-user.dto.ts';
 import type { CreateUserDto } from '../src/dto/create-user.dto.ts';
 import { ZodValidationPipe } from '../src/pipes/zod-validation.pipe.ts';

@@ -1,14 +1,16 @@
 import 'reflect-metadata';
 import { createDispatch } from './dispatcher.ts';
 import { Container } from './ioc/container.ts';
-import { RouteExplorer, Router } from './router.ts';
+import { Router } from './router.ts';
 import { HttpServer } from './server.ts';
 import type { Middleware, MiniNestModule, OptionalCallback } from './types.ts';
 import type { Newable } from './ioc/decorators/types.ts';
+import { RouteExplorer } from './route-explorer.ts';
 
 type App = {
   listen: (port: number, callback: OptionalCallback) => void;
   close: (callback?: () => void) => void;
+  enableShutdownHooks: () => void;
 };
 
 function collectMiddleware(module: Partial<MiniNestModule>) {
@@ -35,6 +37,26 @@ export class AppFactory {
     return {
       listen: (port: number, callback: OptionalCallback) => server.listen(port, callback),
       close: (callback: OptionalCallback) => server.close(callback),
+      enableShutdownHooks: () => {
+        const APP_SHUTDOWN_GRACE_PERIOD = 7500;
+        let shuttingDown = false;
+
+        for (const sig of ['SIGTERM', 'SIGINT']) {
+          process.on(sig, async () => {
+            if (shuttingDown) return;
+            shuttingDown = true;
+            const forceExit = setTimeout(() => {
+              console.error('graceful shutdown timed out, forcing exit');
+              process.exit(1);
+            }, APP_SHUTDOWN_GRACE_PERIOD);
+            forceExit.unref();
+            console.log(`\n[${sig}] shutting down...`);
+            server.close(() => {
+              process.exit(0);
+            });
+          });
+        }
+      },
     };
   }
 }

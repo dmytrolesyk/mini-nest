@@ -26,7 +26,6 @@ export {
 } from './filters/exception-filter.ts';
 export type { FieldError } from './filters/exception-filter.ts';
 export { Router } from './router.ts';
-export type { MatchedRoute } from './router.ts';
 export { AppFactory } from './app-factory.ts';
 export type {
   CallHandler,
@@ -41,6 +40,7 @@ export type {
   PipeTransform,
   RequestBody,
   RouteHandler,
+  MatchedRoute,
 } from './types.ts';
 export { UseGuards } from './decorators/use-guards.ts';
 export { UseInterceptors } from './decorators/use-interceptors.ts';
