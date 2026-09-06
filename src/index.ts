@@ -15,9 +15,32 @@ export { Controller } from './decorators/controller.ts';
 export { Module } from './decorators/module.ts';
 export { Delete, Get, Head, Options, Patch, Post, Put } from './decorators/methods.ts';
 export { Body, Param, Query } from './decorators/params.ts';
-export { ValidationPipe, needsValidation } from './pipes/validation.pipe.ts';
-export type { ValidationError, ValidationResult } from './pipes/validation.pipe.ts';
+export { ZodValidationPipe } from './pipes/zod-validation.pipe.ts';
+export {
+  BadRequestError,
+  ForbiddenError,
+  HttpException,
+  InternalServerError,
+  NotFoundError,
+  ValidationError,
+} from './filters/exception-filter.ts';
+export type { FieldError } from './filters/exception-filter.ts';
 export { Router } from './router.ts';
 export type { MatchedRoute } from './router.ts';
 export { AppFactory } from './app-factory.ts';
-export type { HttpMethod, Path, RequestBody } from './types.ts';
+export type {
+  CallHandler,
+  CanActivate,
+  HttpExecutionContext,
+  HttpMethod,
+  Interceptor,
+  Middleware,
+  MiddlewareConsumer,
+  MiniNestModule,
+  Path,
+  PipeTransform,
+  RequestBody,
+  RouteHandler,
+} from './types.ts';
+export { UseGuards } from './decorators/use-guards.ts';
+export { UseInterceptors } from './decorators/use-interceptors.ts';

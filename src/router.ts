@@ -3,7 +3,6 @@ import { getRoutesMetadata } from './decorators/methods.ts';
 import { getModuleMetadata } from './decorators/module.ts';
 import { getParamsMetadata } from './decorators/params.ts';
 import type { ParameterIndex, ParamMetadata } from './decorators/params.ts';
-import { PARAM_TYPES_METADATA } from './ioc/decorators/tokens.ts';
 import type { Container } from './ioc/container.ts';
 import type { Newable } from './ioc/decorators/types.ts';
 import type {
@@ -12,13 +11,13 @@ import type {
   CanActivate,
   HttpExecutionContext,
   PathParams,
+  RequestBody,
   Interceptor,
   RouteHandler,
   MiniNestModule,
 } from './types.ts';
 import { getGuardsMetadata } from './decorators/use-guards.ts';
-import { needsValidation, ValidationPipe } from './pipes/validation.pipe.ts';
-import { ForbiddenError, ValidationError } from './filters/exception-filter.ts';
+import { ForbiddenError } from './filters/exception-filter.ts';
 import { getInterceptorsMetadata } from './decorators/use-interceptors.ts';
 import { compose } from './helpers/compose.ts';
 
@@ -31,7 +30,6 @@ type RouteEntry = {
   instance: ControllerInstance;
   handler: string | symbol;
   params: Map<ParameterIndex, ParamMetadata>;
-  paramTypes: Newable<object>[];
 };
 
 export type Route = {
@@ -44,29 +42,35 @@ export type MatchedRoute = { route: Route; pathParams: PathParams };
 
 type ArgExtractor = (context: HttpExecutionContext) => unknown;
 
-const createExtractor = (
-  { type, key }: ParamMetadata,
-  paramType: Newable<object>,
-): ArgExtractor => {
-  if (type === 'body') {
-    if (!needsValidation(paramType)) return context => context.body;
-    return async context => {
-      const { instance, errors } = await ValidationPipe.transform(paramType, context.body);
-      if (errors.length > 0) {
-        throw new ValidationError('Validation error occurred', errors);
-      }
-      return instance;
-    };
+const readBodyKey = (body: RequestBody, key: string): unknown => {
+  if (body instanceof URLSearchParams) return body.get(key);
+  if (body !== null && typeof body === 'object') return (body as Record<string, unknown>)[key];
+  return undefined;
+};
+
+/** Where the raw argument comes from, before any pipe touches it. */
+const createReader = ({ type, key }: ParamMetadata): ArgExtractor => {
+  switch (type) {
+    case 'param':
+      return context => context.pathParams[key ?? ''];
+    case 'query':
+      return context => context.url.searchParams.get(key ?? '');
+    case 'body':
+      // `@Body()` takes the whole body, `@Body('name')` plucks one key.
+      return key ? context => readBodyKey(context.body, key) : context => context.body;
   }
-  const paramKey = key ?? '';
-  if (type === 'param') return context => context.pathParams[paramKey];
-  return context => context.url.searchParams.get(paramKey);
+};
+
+const createExtractor = (paramMetadata: ParamMetadata): ArgExtractor => {
+  const read = createReader(paramMetadata);
+  const { pipe } = paramMetadata;
+  return pipe ? context => pipe.transform(read(context)) : read;
 };
 
 const createBuildArgs = (routeEntry: RouteEntry) => {
   const extractors: ArgExtractor[] = [];
   for (const [index, paramMetadata] of routeEntry.params) {
-    extractors[index] = createExtractor(paramMetadata, routeEntry.paramTypes[index]);
+    extractors[index] = createExtractor(paramMetadata);
   }
   const buildArgs = (context: HttpExecutionContext) =>
     Promise.all(extractors.map(extract => extract(context)));
@@ -161,8 +165,6 @@ export class RouteExplorer {
           instance,
           handler,
           params: (params.get(route.handler) ?? new Map()) as Map<ParameterIndex, ParamMetadata>,
-          paramTypes:
-            Reflect.getMetadata(PARAM_TYPES_METADATA, controller.prototype, route.handler) ?? [],
         };
         return {
           pattern,

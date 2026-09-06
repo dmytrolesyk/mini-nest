@@ -32,6 +32,10 @@ export interface Interceptor {
   intercept(context: HttpExecutionContext, next: CallHandler): Promise<unknown>;
 }
 
+export interface PipeTransform<TIn = unknown, TOut = unknown> {
+  transform(value: TIn): TOut | Promise<TOut>;
+}
+
 export type RouteHandler = (context: HttpExecutionContext) => Promise<unknown>;
 
 export type OptionalCallback = (() => void) | undefined;

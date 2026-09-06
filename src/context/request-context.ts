@@ -1,17 +1,28 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { v7 as uuidv7 } from 'uuid';
 
-const als = new AsyncLocalStorage<string>();
+export type RequestStore = { requestId: string };
+
+// Module-level on purpose: one storage per process, shared by every request. The
+// per-request value is the *store*, which `run` binds for the duration of a call
+// and every async continuation spawned inside it.
+const als = new AsyncLocalStorage<RequestStore>();
 
 export class RequestContext {
-  private readonly storage: AsyncLocalStorage<string>;
-  constructor() {
-    this.storage = als;
+  /** Reuses the id the client sent, or mints one when there is none. */
+  static createStore(incomingRequestId?: string): RequestStore {
+    return { requestId: incomingRequestId?.trim() || uuidv7() };
   }
-  get requestId() {
-    return this.storage.getStore();
+
+  static run<T>(store: RequestStore, callback: () => Promise<T>): Promise<T> {
+    return als.run(store, callback);
   }
-  run<T>(callback: () => Promise<T>): Promise<T> {
-    return als.run(uuidv7(), callback);
+
+  static get store(): RequestStore | undefined {
+    return als.getStore();
+  }
+
+  static get requestId(): string | undefined {
+    return als.getStore()?.requestId;
   }
 }

@@ -1,13 +1,13 @@
 import 'reflect-metadata';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import net from 'node:net';
-import type { AddressInfo } from 'node:net';
 import {
   AppFactory,
   Body,
   Controller,
+  Get,
   Module,
+  NotFoundError,
   Post,
   UseGuards,
   UseInterceptors,
@@ -17,10 +17,15 @@ import type {
   CallHandler,
   CanActivate,
   HttpExecutionContext,
+  Interceptor,
   Middleware,
-  NestInterceptor,
+  MiddlewareConsumer,
+  MiniNestModule,
   PipeTransform,
 } from '../src/index.ts';
+import { AuthGuard } from '../src/guards/auth.guard.ts';
+import { LoggingInterceptor } from '../src/interceptors/logging.interceptor.ts';
+import { captureLog, freePort } from './helpers.ts';
 
 /**
  * The lifecycle every request walks, in order:
@@ -28,7 +33,7 @@ import type {
  *   Middleware -> Guard -> Interceptor(before) -> Pipe -> Handler -> Interceptor(after)
  *
  * Each stage appends its own label to `calls`, and the test asserts the exact
- * sequence. A stage that runs in the wrong position fails loudly instead of
+ * sequence. A stage running in the wrong position fails loudly rather than
  * quietly appearing to work.
  */
 const EXPECTED_ORDER = [
@@ -41,6 +46,7 @@ const EXPECTED_ORDER = [
 ];
 
 let calls: string[] = [];
+let handlerHits = 0;
 
 const recordingMiddleware: Middleware = async (_context, next) => {
   calls.push('middleware');
@@ -56,7 +62,7 @@ class RecordingGuard implements CanActivate {
 }
 
 @injectable()
-class RecordingInterceptor implements NestInterceptor {
+class RecordingInterceptor implements Interceptor {
   async intercept(_context: HttpExecutionContext, next: CallHandler): Promise<unknown> {
     calls.push('interceptor:before');
     const result = await next.handle();
@@ -79,22 +85,49 @@ class LifecycleController {
   @Post()
   run(@Body(recordingPipe) body: unknown) {
     calls.push('handler');
+    handlerHits += 1;
     return { received: body };
   }
 }
 
-@Module({ controllers: [LifecycleController] })
-class LifecycleModule {}
+/** Guarded by the real AuthGuard, so the 403 test exercises shipped code. */
+@Controller('secure')
+@UseGuards(AuthGuard)
+class SecureController {
+  @Get()
+  read() {
+    handlerHits += 1;
+    return { secret: 'sunlight' };
+  }
+}
 
-const freePort = async (): Promise<number> => {
-  const probe = net.createServer();
-  await new Promise<void>(resolve => probe.listen(0, resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>(resolve => probe.close(() => resolve()));
-  return port;
-};
+@Controller('failures')
+@UseInterceptors(LoggingInterceptor)
+class FailureController {
+  @Get('boom')
+  boom() {
+    throw new Error('boom');
+  }
 
-const app = AppFactory.create([LifecycleModule], { middleware: [recordingMiddleware] });
+  @Get('missing')
+  missing() {
+    throw new NotFoundError('User with this id not found');
+  }
+
+  @Get('ok')
+  ok() {
+    return { ok: true };
+  }
+}
+
+@Module({ controllers: [LifecycleController, SecureController, FailureController] })
+class LifecycleModule implements MiniNestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply([recordingMiddleware]);
+  }
+}
+
+const app = AppFactory.create(LifecycleModule);
 let baseUrl = '';
 
 before(async () => {
@@ -107,6 +140,7 @@ after(() => app.close());
 
 beforeEach(() => {
   calls = [];
+  handlerHits = 0;
 });
 
 const post = (body: object) =>
@@ -130,16 +164,72 @@ describe('request lifecycle', () => {
     assert.deepEqual(await response.json(), { received: { hello: 'world' } });
   });
 
-  it('runs the guard before the handler, not after', async () => {
-    await post({ hello: 'world' });
-
-    assert.ok(calls.indexOf('guard') < calls.indexOf('handler'));
-  });
-
-  it('closes the interceptor around the pipe and the handler', async () => {
+  it('closes the interceptor around both the pipe and the handler', async () => {
     await post({ hello: 'world' });
 
     assert.ok(calls.indexOf('interceptor:before') < calls.indexOf('pipe'));
     assert.ok(calls.indexOf('handler') < calls.indexOf('interceptor:after'));
+  });
+});
+
+describe('guard', () => {
+  it('answers 403 when the Authorization header is missing', async () => {
+    const response = await fetch(`${baseUrl}/secure`);
+
+    assert.equal(response.status, 403);
+  });
+
+  it('does not reach the handler when it denies', async () => {
+    await fetch(`${baseUrl}/secure`);
+
+    assert.equal(handlerHits, 0);
+  });
+
+  it('lets an authorized request through', async () => {
+    const response = await fetch(`${baseUrl}/secure`, {
+      headers: { Authorization: 'authorized' },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { secret: 'sunlight' });
+    assert.equal(handlerHits, 1);
+  });
+});
+
+describe('interceptor', () => {
+  it('logs the route and how long it took', async () => {
+    const lines = await captureLog(async () => {
+      await fetch(`${baseUrl}/failures/ok`);
+    });
+    const timed = lines.find(line => /[0-9]+(\.[0-9]+)? ?ms/.test(line));
+
+    assert.ok(timed, `no timing line in: ${JSON.stringify(lines)}`);
+    assert.match(timed, /GET \/failures\/ok/);
+  });
+
+  it('still logs a duration when the handler throws', async () => {
+    const lines = await captureLog(async () => {
+      await fetch(`${baseUrl}/failures/boom`);
+    });
+
+    assert.ok(lines.some(line => /[0-9]+(\.[0-9]+)? ?ms/.test(line)));
+  });
+});
+
+describe('exception filter', () => {
+  it('turns an unexpected error into a 500 that leaks nothing', async () => {
+    const response = await fetch(`${baseUrl}/failures/boom`);
+    const text = await response.text();
+
+    assert.equal(response.status, 500);
+    assert.doesNotMatch(text, /boom|at .*\.ts:/);
+  });
+
+  it('maps a domain error to its status and keeps the message', async () => {
+    const response = await fetch(`${baseUrl}/failures/missing`);
+    const body = (await response.json()) as { message: string };
+
+    assert.equal(response.status, 404);
+    assert.equal(body.message, 'User with this id not found');
   });
 });

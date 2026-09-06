@@ -16,9 +16,11 @@ import {
   Router,
   injectable,
 } from '../src/index.ts';
-import type { ValidationError } from '../src/index.ts';
+import type { FieldError } from '../src/index.ts';
 import { RouteExplorer } from '../src/router.ts';
-import { CreateUserDto } from '../src/dto/create-user.dto.ts';
+import { CreateUserSchema } from '../src/dto/create-user.dto.ts';
+import type { CreateUserDto } from '../src/dto/create-user.dto.ts';
+import { ZodValidationPipe } from '../src/pipes/zod-validation.pipe.ts';
 
 @injectable()
 class UsersService {
@@ -42,8 +44,8 @@ class UsersController {
   }
 
   @Post()
-  createUser(@Body() createUserDto: CreateUserDto) {
-    return { isDto: createUserDto instanceof CreateUserDto, name: createUserDto.name };
+  createUser(@Body(new ZodValidationPipe(CreateUserSchema)) createUserDto: CreateUserDto) {
+    return { parsed: true, name: createUserDto.name };
   }
 }
 
@@ -110,15 +112,11 @@ describe('dispatcher', () => {
     assert.deepEqual(await response.json(), { limit: '5' });
   });
 
-  it(
-    'answers 404 when no route matches',
-    { todo: 'dispatch maps every error to 500 until exception filters land' },
-    async () => {
-      const response = await fetch(`${baseUrl}/unknown`);
+  it('answers 404 when no route matches', async () => {
+    const response = await fetch(`${baseUrl}/unknown`);
 
-      assert.equal(response.status, 404);
-    },
-  );
+    assert.equal(response.status, 404);
+  });
 });
 
 describe('validation', () => {
@@ -126,24 +124,20 @@ describe('validation', () => {
     const response = await postUser({ name: 'Solaire', email: 'solaire@example.com', age: 30 });
 
     assert.equal(response.status, 201);
-    assert.deepEqual(await response.json(), { isDto: true, name: 'Solaire' });
+    assert.deepEqual(await response.json(), { parsed: true, name: 'Solaire' });
   });
 
-  it(
-    'answers 400 listing every field that failed and why',
-    { todo: 'validation errors are swallowed into a generic 500 until exception filters land' },
-    async () => {
-      const response = await postUser({ name: 'S', email: 'not-an-email', age: 1.5 });
-      const body = (await response.json()) as { errors: ValidationError[] };
+  it('answers 400 listing every field that failed and why', async () => {
+    const response = await postUser({ name: 'S', email: 'not-an-email', age: 1.5 });
+    const body = (await response.json()) as { errors: FieldError[] };
 
-      assert.equal(response.status, 400);
-      assert.match(JSON.stringify(body), /email/);
-      assert.deepEqual(
-        body.errors.map(error => error.field),
-        ['name', 'email', 'age'],
-      );
-    },
-  );
+    assert.equal(response.status, 400);
+    assert.match(JSON.stringify(body), /email/);
+    assert.deepEqual(
+      body.errors.map(error => error.field),
+      ['name', 'email', 'age'],
+    );
+  });
 });
 
 describe('request body', () => {
@@ -162,22 +156,18 @@ describe('request body', () => {
     } as RequestInit);
 
     assert.equal(response.status, 201);
-    assert.deepEqual(await response.json(), { isDto: true, name: 'Solaire' });
+    assert.deepEqual(await response.json(), { parsed: true, name: 'Solaire' });
   });
 
-  it(
-    'answers 400 rather than 500 when the JSON body is malformed',
-    { skip: 'BadRequestError escapes HttpServer as an unhandled rejection and kills the process' },
-    async () => {
-      const response = await fetch(`${baseUrl}/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{"name":"x",,,}',
-      });
+  it('answers 400 rather than 500 when the JSON body is malformed', async () => {
+    const response = await fetch(`${baseUrl}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"name":"x",,,}',
+    });
 
-      assert.equal(response.status, 400);
-    },
-  );
+    assert.equal(response.status, 400);
+  });
 });
 
 describe('container integration', () => {

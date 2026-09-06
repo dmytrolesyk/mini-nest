@@ -7,7 +7,11 @@ import type {
   STATUS_CODE,
 } from './types.ts';
 import { RequestContext } from './context/request-context.ts';
-import { BadRequestError, InternalServerError, exceptionFilter } from './filters/exception-filter.ts';
+import {
+  BadRequestError,
+  InternalServerError,
+  exceptionFilter,
+} from './filters/exception-filter.ts';
 
 const CONTENT_TYPES_MAP = {
   txt: 'text/plain',
@@ -46,10 +50,15 @@ const CONTENT_TYPES_MAP = {
 
 const BODYLESS_METHODS = ['GET', 'HEAD'];
 
+const REQUEST_ID_HEADER = 'X-Request-Id';
+
+const readIncomingRequestId = (request: IncomingMessage): string | undefined => {
+  const value = request.headers[REQUEST_ID_HEADER.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
+};
+
 export type HandlerResponse = { status: STATUS_CODE; payload: unknown };
 
-// Serialised once at module load. Both fallback paths below are reached *because*
-// writing a response failed, so neither can afford to call JSON.stringify again.
 const INTERNAL_ERROR = new InternalServerError('Something went wrong').toPayload();
 const INTERNAL_ERROR_BODY = JSON.stringify(INTERNAL_ERROR.payload);
 
@@ -58,7 +67,8 @@ export class HttpServer {
   private _port: number | undefined;
   constructor(onRequest: (context: HttpExecutionContext) => Promise<HandlerResponse>) {
     this.server = http.createServer((req, res) => {
-      const requestContext = new RequestContext();
+      const store = RequestContext.createStore(readIncomingRequestId(req));
+      res.setHeader(REQUEST_ID_HEADER, store.requestId);
       const writeResponse = (status: STATUS_CODE, payload: unknown) => {
         res.statusCode = status;
         if (payload === undefined || payload === null) {
@@ -98,7 +108,7 @@ export class HttpServer {
           writeResponse(status, payload);
         }
       };
-      requestContext.run(handleRequest).catch(error => {
+      RequestContext.run(store, handleRequest).catch(error => {
         console.error(error);
         if (res.headersSent) {
           res.destroy();
