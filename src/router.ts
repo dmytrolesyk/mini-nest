@@ -6,9 +6,21 @@ import type { ParameterIndex, ParamMetadata } from './decorators/params.ts';
 import { PARAM_TYPES_METADATA } from './ioc/decorators/tokens.ts';
 import type { Container } from './ioc/container.ts';
 import type { Newable } from './ioc/decorators/types.ts';
-import type { HttpMethod, Path, CanActivate, HttpExecutionContext, PathParams } from './types.ts';
+import type {
+  HttpMethod,
+  Path,
+  CanActivate,
+  HttpExecutionContext,
+  PathParams,
+  Interceptor,
+  RouteHandler,
+  MiniNestModule,
+} from './types.ts';
 import { getGuardsMetadata } from './decorators/use-guards.ts';
 import { needsValidation, ValidationPipe } from './pipes/validation.pipe.ts';
+import { ForbiddenError, ValidationError } from './filters/exception-filter.ts';
+import { getInterceptorsMetadata } from './decorators/use-interceptors.ts';
+import { compose } from './helpers/compose.ts';
 
 type ControllerInstance = Record<string | symbol, (...args: unknown[]) => unknown>;
 
@@ -41,10 +53,7 @@ const createExtractor = (
     return async context => {
       const { instance, errors } = await ValidationPipe.transform(paramType, context.body);
       if (errors.length > 0) {
-        // will be refactored to proper error class
-        throw new Error(
-          errors.map(({ field, constraints }) => `${field}: ${constraints.join(', ')}`).join('\n'),
-        );
+        throw new ValidationError('Validation error occurred', errors);
       }
       return instance;
     };
@@ -52,6 +61,17 @@ const createExtractor = (
   const paramKey = key ?? '';
   if (type === 'param') return context => context.pathParams[paramKey];
   return context => context.url.searchParams.get(paramKey);
+};
+
+const createBuildArgs = (routeEntry: RouteEntry) => {
+  const extractors: ArgExtractor[] = [];
+  for (const [index, paramMetadata] of routeEntry.params) {
+    extractors[index] = createExtractor(paramMetadata, routeEntry.paramTypes[index]);
+  }
+  const buildArgs = (context: HttpExecutionContext) =>
+    Promise.all(extractors.map(extract => extract(context)));
+
+  return buildArgs;
 };
 
 const toPathname = (...paths: Path[]): string => {
@@ -78,38 +98,55 @@ export class Router {
   }
 }
 
+const runGuards = async (context: HttpExecutionContext, guards: CanActivate[]) => {
+  for (const guard of guards) {
+    const canActivate = await guard.canActivate(context);
+    if (!canActivate) {
+      throw new ForbiddenError('Cannot process this request');
+    }
+  }
+};
+
+type Wrapper = (handler: RouteHandler) => RouteHandler;
+
+const toInterceptedWrapper = (interceptor: Interceptor): Wrapper => {
+  return (handler: RouteHandler): RouteHandler => {
+    return context => interceptor.intercept(context, { handle: () => handler(context) });
+  };
+};
+
+const composeInterceptors = (interceptors: Interceptor[]) => {
+  const interceptedWrappers = interceptors.map(toInterceptedWrapper);
+  return compose(...interceptedWrappers);
+};
+
 export class RouteExplorer {
   private readonly container: Container;
   constructor(container: Container) {
     this.container = container;
   }
   private computeRouteHandler(routeEntry: RouteEntry) {
-    const guards = getGuardsMetadata(routeEntry.controllerClass).map(
-      guard => this.container.get(guard) as CanActivate,
+    const guards = getGuardsMetadata(routeEntry.controllerClass).map(guard =>
+      this.container.get(guard),
     );
-    const runGuards = async (context: HttpExecutionContext) => {
-      for (const guard of guards) {
-        const canActivate = await guard.canActivate(context);
-        if (!canActivate) {
-          throw new Error('401'); // will be refactored to proper error class
-        }
-      }
-    };
-    const extractors: ArgExtractor[] = [];
-    for (const [index, paramMetadata] of routeEntry.params) {
-      extractors[index] = createExtractor(paramMetadata, routeEntry.paramTypes[index]);
-    }
-    const buildArgs = (context: HttpExecutionContext) =>
-      Promise.all(extractors.map(extract => extract(context)));
-    const controllerHandler = routeEntry.instance[routeEntry.handler].bind(routeEntry.instance);
-    return async (context: HttpExecutionContext) => {
-      await runGuards(context);
+    const interceptors = getInterceptorsMetadata(routeEntry.controllerClass).map(interceptor =>
+      this.container.get(interceptor),
+    );
+    const composedInterceptor = composeInterceptors(interceptors);
+    const buildArgs = createBuildArgs(routeEntry);
+    const controllerHandler: RouteHandler = async context => {
       const args = await buildArgs(context);
-      return await controllerHandler(...args);
+      return await routeEntry.instance[routeEntry.handler](...args);
     };
+    const interceptedHandler = composedInterceptor(controllerHandler);
+    const composedHandler: RouteHandler = async context => {
+      await runGuards(context, guards);
+      return await interceptedHandler(context);
+    };
+    return composedHandler;
   }
-  initRoutes(modules: Newable[]) {
-    const controllers = modules.flatMap(module => getModuleMetadata(module).controllers);
+  initRoutes(module: Newable<Partial<MiniNestModule>>) {
+    const controllers = getModuleMetadata(module).controllers;
     return controllers.flatMap(controller => {
       const prefix = getControllerPrefix(controller) ?? '';
       const instance = this.container.get(controller) as ControllerInstance;

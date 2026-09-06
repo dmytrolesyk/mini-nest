@@ -1,6 +1,13 @@
 import http, { IncomingMessage, Server, STATUS_CODES } from 'node:http';
-import type { OptionalCallback, RequestBody, HttpExecutionContext, HttpMethod } from './types.ts';
+import type {
+  OptionalCallback,
+  RequestBody,
+  HttpExecutionContext,
+  HttpMethod,
+  STATUS_CODE,
+} from './types.ts';
 import { RequestContext } from './context/request-context.ts';
+import { BadRequestError, InternalServerError, exceptionFilter } from './filters/exception-filter.ts';
 
 const CONTENT_TYPES_MAP = {
   txt: 'text/plain',
@@ -39,29 +46,67 @@ const CONTENT_TYPES_MAP = {
 
 const BODYLESS_METHODS = ['GET', 'HEAD'];
 
-export class BadRequestError extends Error {}
+export type HandlerResponse = { status: STATUS_CODE; payload: unknown };
 
-export type HandlerResponse = { status: number; payload: unknown };
+// Serialised once at module load. Both fallback paths below are reached *because*
+// writing a response failed, so neither can afford to call JSON.stringify again.
+const INTERNAL_ERROR = new InternalServerError('Something went wrong').toPayload();
+const INTERNAL_ERROR_BODY = JSON.stringify(INTERNAL_ERROR.payload);
 
 export class HttpServer {
   private server: Server;
   private _port: number | undefined;
-  constructor(onRequest: (context: HttpExecutionContext) => Promise<void>) {
+  constructor(onRequest: (context: HttpExecutionContext) => Promise<HandlerResponse>) {
     this.server = http.createServer((req, res) => {
       const requestContext = new RequestContext();
-      requestContext.run(async () => {
-        const { url = '/' } = req;
-        const method = (req.method ?? 'GET') as HttpMethod;
-        const body = await this.parseBody(req);
-        const context: HttpExecutionContext = {
-          method,
-          url: new URL(url, 'http://localhost'),
-          request: req,
-          response: res,
-          body,
-          pathParams: {},
-        };
-        await onRequest(context);
+      const writeResponse = (status: STATUS_CODE, payload: unknown) => {
+        res.statusCode = status;
+        if (payload === undefined || payload === null) {
+          res.end();
+          return;
+        }
+        let serialised: string;
+        try {
+          serialised = JSON.stringify(payload);
+        } catch (error) {
+          console.error(error);
+          res.statusCode = INTERNAL_ERROR.status;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(INTERNAL_ERROR_BODY);
+          return;
+        }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(serialised);
+      };
+      const handleRequest = async () => {
+        try {
+          const { url = '/' } = req;
+          const method = (req.method ?? 'GET') as HttpMethod;
+          const body = await this.parseBody(req);
+          const context: HttpExecutionContext = {
+            method,
+            url: new URL(url, 'http://localhost'),
+            request: req,
+            response: res,
+            body,
+            pathParams: {},
+          };
+          const { status, payload } = await onRequest(context);
+          writeResponse(status, payload);
+        } catch (error) {
+          const { status, payload } = exceptionFilter(error);
+          writeResponse(status, payload);
+        }
+      };
+      requestContext.run(handleRequest).catch(error => {
+        console.error(error);
+        if (res.headersSent) {
+          res.destroy();
+          return;
+        }
+        res.statusCode = INTERNAL_ERROR.status;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(INTERNAL_ERROR_BODY);
       });
     });
   }

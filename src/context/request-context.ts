@@ -11,9 +11,7 @@ export class RequestContext {
   get requestId() {
     return this.storage.getStore();
   }
-  run(callback: () => Promise<void>) {
-    als.run(uuidv7(), async () => {
-      await callback();
-    });
+  run<T>(callback: () => Promise<T>): Promise<T> {
+    return als.run(uuidv7(), callback);
   }
 }

@@ -2,10 +2,16 @@ import 'reflect-metadata';
 import { injectable } from './ioc/decorators/injectable.ts';
 import { Controller } from './decorators/controller.ts';
 import { Get, Post } from './decorators/methods.ts';
-import { Module } from './decorators/module.ts';
 import { Body, Param, Query } from './decorators/params.ts';
 import { CreateUserDto } from './dto/create-user.dto.ts';
 import { AppFactory } from './app-factory.ts';
+import { NotFoundError } from './filters/exception-filter.ts';
+import { UseGuards } from './decorators/use-guards.ts';
+import { AuthGuard } from './guards/auth.guard.ts';
+import { UseInterceptors } from './decorators/use-interceptors.ts';
+import { LoggingInterceptor } from './interceptors/logging.interceptor.ts';
+import type { MiddlewareConsumer, MiniNestModule } from './types.ts';
+import { Module } from './decorators/module.ts';
 
 type User = { id: number } & CreateUserDto;
 
@@ -21,7 +27,10 @@ class UsersService {
   }
 
   findOne(id: number) {
-    return this.users.find(user => user.id === id);
+    const user = this.users.find(user => user.id === id);
+    if (!user) {
+      throw new NotFoundError('User with this id not found');
+    }
   }
 
   create(dto: CreateUserDto) {
@@ -32,11 +41,14 @@ class UsersService {
 }
 
 @Controller('users')
+@UseGuards(AuthGuard)
+@UseInterceptors(LoggingInterceptor)
 class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
   getAllUsers(@Query('limit') limit: string) {
+    console.log('controller');
     return this.usersService.findAll(limit ? Number(limit) : undefined);
   }
 
@@ -52,8 +64,17 @@ class UsersController {
 }
 
 @Module({ controllers: [UsersController] })
-class AppModule {}
+class AppModule implements MiniNestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply([
+      (context, next) => {
+        context.response.appendHeader('x-middleware-header', 'hi-there');
+        return next();
+      },
+    ]);
+  }
+}
 
-AppFactory.create([AppModule]).listen(3000, () => {
+AppFactory.create(AppModule).listen(3000, () => {
   console.log('app started');
 });
