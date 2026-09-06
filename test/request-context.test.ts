@@ -50,7 +50,9 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
 });
 
-after(() => app.close());
+after(async () => {
+  await app.close();
+});
 
 describe('request id', () => {
   it('generates one and returns it in the response header', async () => {

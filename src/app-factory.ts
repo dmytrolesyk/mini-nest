@@ -9,7 +9,7 @@ import { RouteExplorer } from './route-explorer.ts';
 
 type App = {
   listen: (port: number, callback: OptionalCallback) => void;
-  close: (callback?: () => void) => void;
+  close: (gracePeriodMs?: number) => Promise<void>;
   enableShutdownHooks: () => void;
 };
 
@@ -36,7 +36,7 @@ export class AppFactory {
     const server = new HttpServer(dispatch);
     return {
       listen: (port: number, callback: OptionalCallback) => server.listen(port, callback),
-      close: (callback: OptionalCallback) => server.close(callback),
+      close: (gracePeriodMs?: number) => server.close(gracePeriodMs),
       enableShutdownHooks: () => {
         const APP_SHUTDOWN_GRACE_PERIOD = 7500;
         let shuttingDown = false;
@@ -51,9 +51,8 @@ export class AppFactory {
             }, APP_SHUTDOWN_GRACE_PERIOD);
             forceExit.unref();
             console.log(`\n[${sig}] shutting down...`);
-            server.close(() => {
-              process.exit(0);
-            });
+            await server.close();
+            process.exit(0);
           });
         }
       },

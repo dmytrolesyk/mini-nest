@@ -53,6 +53,12 @@ const recordingMiddleware: Middleware = async (_context, next) => {
   await next();
 };
 
+/** Ends the chain without calling next() when asked to, recording nothing. */
+const shortCircuitMiddleware: Middleware = async (context, next) => {
+  if (context.url.searchParams.has('block')) return;
+  await next();
+};
+
 @injectable()
 class RecordingGuard implements CanActivate {
   canActivate(_context: HttpExecutionContext): boolean {
@@ -123,7 +129,7 @@ class FailureController {
 @Module({ controllers: [LifecycleController, SecureController, FailureController] })
 class LifecycleModule implements MiniNestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply([recordingMiddleware]);
+    consumer.apply([recordingMiddleware, shortCircuitMiddleware]);
   }
 }
 
@@ -136,7 +142,9 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
 });
 
-after(() => app.close());
+after(async () => {
+  await app.close();
+});
 
 beforeEach(() => {
   calls = [];
@@ -169,6 +177,27 @@ describe('request lifecycle', () => {
 
     assert.ok(calls.indexOf('interceptor:before') < calls.indexOf('pipe'));
     assert.ok(calls.indexOf('handler') < calls.indexOf('interceptor:after'));
+  });
+});
+
+describe('middleware', () => {
+  it('runs even when no route matches', async () => {
+    const response = await fetch(`${baseUrl}/no-such-route`);
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(calls, ['middleware']);
+  });
+
+  it('short-circuits the request when it does not call next()', async () => {
+    const response = await fetch(`${baseUrl}/lifecycle?block=1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hello: 'world' }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(handlerHits, 0);
+    assert.deepEqual(calls, ['middleware']);
   });
 });
 
