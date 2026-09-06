@@ -68,7 +68,9 @@ class AppModule implements MiniNestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply([
       (context, next) => {
+        console.log('middleware in');
         context.response.appendHeader('x-middleware-header', 'oh-hi-mark');
+        context.response.on('finish', () => console.log('middleware out'));
         next();
       },
     ]);
