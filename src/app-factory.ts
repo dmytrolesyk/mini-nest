@@ -13,7 +13,7 @@ type App = {
 
 function collectMiddleware(module: Partial<MiniNestModule>) {
   const middlewareCollection: Middleware[] = [];
-  if (Reflect.has(module, 'configure') && typeof module.configure === 'function') {
+  if (typeof module.configure === 'function') {
     module.configure({
       apply: middleware => {
         middlewareCollection.push(...middleware);

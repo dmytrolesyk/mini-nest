@@ -58,7 +58,7 @@ const freePort = async (): Promise<number> => {
   return port;
 };
 
-const app = AppFactory.create([TestModule]);
+const app = AppFactory.create(TestModule);
 let baseUrl = '';
 
 before(async () => {
@@ -78,7 +78,7 @@ const postUser = (body: object) => {
 };
 
 describe('router', () => {
-  const routes = new RouteExplorer(new Container()).initRoutes([TestModule]);
+  const routes = new RouteExplorer(new Container()).initRoutes(TestModule);
 
   it('finds a route by method and path, joining controller prefix with method path', () => {
     const matched = new Router(routes).match('GET', '/users/42');

@@ -68,8 +68,8 @@ class AppModule implements MiniNestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply([
       (context, next) => {
-        context.response.appendHeader('x-middleware-header', 'hi-there');
-        return next();
+        context.response.appendHeader('x-middleware-header', 'oh-hi-mark');
+        next();
       },
     ]);
   }
