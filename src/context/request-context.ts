@@ -3,13 +3,9 @@ import { v7 as uuidv7 } from 'uuid';
 
 export type RequestStore = { requestId: string };
 
-// Module-level on purpose: one storage per process, shared by every request. The
-// per-request value is the *store*, which `run` binds for the duration of a call
-// and every async continuation spawned inside it.
 const als = new AsyncLocalStorage<RequestStore>();
 
 export class RequestContext {
-  /** Reuses the id the client sent, or mints one when there is none. */
   static createStore(incomingRequestId?: string): RequestStore {
     return { requestId: incomingRequestId?.trim() || uuidv7() };
   }

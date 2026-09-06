@@ -48,7 +48,6 @@ const readBodyKey = (body: RequestBody, key: string): unknown => {
   return undefined;
 };
 
-/** Where the raw argument comes from, before any pipe touches it. */
 const createReader = ({ type, key }: ParamMetadata): ArgExtractor => {
   switch (type) {
     case 'param':
@@ -56,7 +55,6 @@ const createReader = ({ type, key }: ParamMetadata): ArgExtractor => {
     case 'query':
       return context => context.url.searchParams.get(key ?? '');
     case 'body':
-      // `@Body()` takes the whole body, `@Body('name')` plucks one key.
       return key ? context => readBodyKey(context.body, key) : context => context.body;
   }
 };

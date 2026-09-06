@@ -10,8 +10,6 @@ export class LoggingInterceptor implements Interceptor {
     try {
       return await next.handle();
     } finally {
-      // `finally` so a handler that throws is still timed — that is the request
-      // you most want a duration for.
       const duration = (performance.now() - start).toFixed(1);
       console.log(`${method} ${url.pathname} — ${duration} ms`);
     }
