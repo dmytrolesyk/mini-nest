@@ -1,11 +1,26 @@
 import 'reflect-metadata';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { Body, Container, Controller, Factory, Get, Module, Param, Post, Query, Router, injectable } from '../src/index.ts';
-import type { ValidationError } from '../src/index.ts';
-import { CreateUserDto } from '../src/dto/create-user.dto.ts';
+import {
+  AppFactory,
+  Body,
+  Container,
+  Controller,
+  Get,
+  Module,
+  Param,
+  Post,
+  Query,
+  Router,
+  injectable,
+} from '../src/index.ts';
+import type { FieldError } from '../src/index.ts';
+import { RouteExplorer } from '../src/route-explorer.ts';
+import { CreateUserSchema } from '../src/dto/create-user.dto.ts';
+import type { CreateUserDto } from '../src/dto/create-user.dto.ts';
+import { ZodValidationPipe } from '../src/pipes/zod-validation.pipe.ts';
 
 @injectable()
 class UsersService {
@@ -29,24 +44,34 @@ class UsersController {
   }
 
   @Post()
-  createUser(@Body() createUserDto: CreateUserDto) {
-    return { isDto: createUserDto instanceof CreateUserDto, name: createUserDto.name };
+  createUser(@Body(new ZodValidationPipe(CreateUserSchema)) createUserDto: CreateUserDto) {
+    return { parsed: true, name: createUserDto.name };
   }
 }
 
 @Module({ controllers: [UsersController] })
 class TestModule {}
 
-const app = Factory.create([TestModule]);
+const freePort = async (): Promise<number> => {
+  const probe = net.createServer();
+  await new Promise<void>(resolve => probe.listen(0, resolve));
+  const { port } = probe.address() as AddressInfo;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  return port;
+};
+
+const app = AppFactory.create(TestModule);
 let baseUrl = '';
 
 before(async () => {
-  const server = app.listen(0);
-  await once(server, 'listening');
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const port = await freePort();
+  await new Promise<void>(resolve => app.listen(port, resolve));
+  baseUrl = `http://127.0.0.1:${port}`;
 });
 
-after(() => app.close());
+after(async () => {
+  await app.close();
+});
 
 const postUser = (body: object) => {
   return fetch(`${baseUrl}/users`, {
@@ -57,16 +82,18 @@ const postUser = (body: object) => {
 };
 
 describe('router', () => {
+  const routes = new RouteExplorer(new Container()).initRoutes(TestModule);
+
   it('finds a route by method and path, joining controller prefix with method path', () => {
-    const matched = new Router([TestModule], new Container()).match('GET', '/users/42');
+    const matched = new Router(routes).match('GET', '/users/42');
 
     assert.ok(matched);
-    assert.equal(matched.route.handler, 'getUser');
+    assert.equal(matched.route.method, 'GET');
     assert.deepEqual(matched.pathParams, { id: '42' });
   });
 
   it('does not match a path that no controller declares', () => {
-    const router = new Router([TestModule], new Container());
+    const router = new Router(routes);
 
     assert.equal(router.match('GET', '/unknown'), undefined);
   });
@@ -99,12 +126,12 @@ describe('validation', () => {
     const response = await postUser({ name: 'Solaire', email: 'solaire@example.com', age: 30 });
 
     assert.equal(response.status, 201);
-    assert.deepEqual(await response.json(), { isDto: true, name: 'Solaire' });
+    assert.deepEqual(await response.json(), { parsed: true, name: 'Solaire' });
   });
 
   it('answers 400 listing every field that failed and why', async () => {
     const response = await postUser({ name: 'S', email: 'not-an-email', age: 1.5 });
-    const body = (await response.json()) as { errors: ValidationError[] };
+    const body = (await response.json()) as { errors: FieldError[] };
 
     assert.equal(response.status, 400);
     assert.match(JSON.stringify(body), /email/);
@@ -131,7 +158,7 @@ describe('request body', () => {
     } as RequestInit);
 
     assert.equal(response.status, 201);
-    assert.deepEqual(await response.json(), { isDto: true, name: 'Solaire' });
+    assert.deepEqual(await response.json(), { parsed: true, name: 'Solaire' });
   });
 
   it('answers 400 rather than 500 when the JSON body is malformed', async () => {
@@ -147,9 +174,10 @@ describe('request body', () => {
 
 describe('container integration', () => {
   it('injects the singleton the container resolves', () => {
-    const controller = app.container.get(UsersController);
+    const container = new Container();
+    const controller = container.get(UsersController);
 
     assert.ok(controller.usersService instanceof UsersService);
-    assert.equal(controller.usersService, app.container.get(UsersService));
+    assert.equal(controller.usersService, container.get(UsersService));
   });
 });
