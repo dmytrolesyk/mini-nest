@@ -62,10 +62,12 @@ export class InternalServerError extends HttpException {
 }
 
 export const exceptionFilter = (error: unknown) => {
-  console.error(error);
+  // An HttpException is a deliberate outcome — a 403 or a 404 is the framework
+  // working, not an incident. Only unexpected errors are worth a stack trace,
+  // and that trace stays server-side: the client gets a fixed message.
   if (error instanceof HttpException) {
     return error.toPayload();
   }
-  const genericError = new InternalServerError('Something went wrong');
-  return genericError.toPayload();
+  console.error(error);
+  return new InternalServerError('Something went wrong').toPayload();
 };

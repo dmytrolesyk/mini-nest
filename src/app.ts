@@ -53,11 +53,14 @@ class UsersService {
 @UseGuards(AuthGuard)
 @UseInterceptors(LoggingInterceptor)
 class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly logger: LoggerService,
+  ) {}
 
   @Get()
   getAllUsers(@Query('limit') limit: string) {
-    console.log('controller');
+    this.logger.log('GET /users');
     return this.usersService.findAll(limit ? Number(limit) : undefined);
   }
 
@@ -74,12 +77,16 @@ class UsersController {
 
 @Module({ controllers: [UsersController] })
 class AppModule implements MiniNestModule {
+  constructor(private readonly logger: LoggerService) {}
+
   configure(consumer: MiddlewareConsumer) {
     consumer.apply([
+      // `await next()` is required: the route handler is the last link of the
+      // chain, so skipping the await sends the response before it has finished.
       async (context, next) => {
-        console.log('middleware in');
+        this.logger.log('middleware in');
         context.response.appendHeader('x-middleware-header', 'oh-hi-mark');
-        context.response.on('finish', () => console.log('middleware out'));
+        context.response.on('finish', () => this.logger.log('middleware out'));
         await next();
       },
     ]);

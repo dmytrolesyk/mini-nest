@@ -68,10 +68,10 @@ so a graph of concrete classes needs no registration at all.
 
 ## Scopes
 
-| scope | behaviour |
-| --- | --- |
+| scope       | behaviour                            |
+| ----------- | ------------------------------------ |
 | `singleton` | default — one instance per container |
-| `transient` | a new instance on every resolve |
+| `transient` | a new instance on every resolve      |
 
 Declare the scope on the class:
 
@@ -146,31 +146,126 @@ export function injectable(options: InjectableOptions = {}): ClassDecorator {
 
 ## HTTP-шар
 
-`Factory.create([AppModule])` піднімає `node:http`-сервер поверх контейнера з частини 1.
+`AppFactory.create(AppModule)` піднімає `node:http`-сервер поверх контейнера з частини 1.
 
-Маршрути збирає `src/router.ts`: він проходить модулі, читає `@Controller(prefix)` з класу
-та список маршрутів із прототипу, просить контейнер створити екземпляр контролера і склеює
-повний шлях із префікса контролера та шляху методу. Зіставлення робить `URLPattern`, тому
-`:id` у шляху стає іменованою групою. Роутер нічого не знає про `req`/`res` — його можна
-тестувати без сервера.
+Маршрути збирає `src/route-explorer.ts`: він проходить модулі, читає `@Controller(prefix)` з
+класу та список маршрутів із прототипу, просить контейнер створити екземпляр контролера і
+склеює повний шлях із префікса контролера та шляху методу. Зіставлення робить `URLPattern`,
+тому `:id` у шляху стає іменованою групою. `src/router.ts` — це вже просто таблиця
+`(method, pathname) → handler`: він нічого не знає ні про декоратори, ні про контейнер, ні
+про `req`/`res`, тож його можна тестувати без сервера.
 
-`src/dispatcher.ts` відповідає лише за HTTP: парсить тіло, питає роутер про збіг, збирає
-масив аргументів, проганяє DTO через `ValidationPipe` і серіалізує результат у JSON.
+Ключова ідея: увесь ланцюг збирається **один раз під час старту**, а не на кожен запит.
+`computeRouteHandler` розв'язує гварди й інтерсептори з контейнера, компілює екстрактори
+параметрів у замикання і згортає все у **одну** функцію `RouteHandler`. На гарячому шляху
+залишаються тільки виклики.
+
+## Життєвий цикл запиту
+
+Кожен HTTP-виклик проходить ті самі стадії, у тому самому порядку. Порядок зафіксовано
+тестом `test/lifecycle.test.ts`, який збирає масив міток і порівнює його з очікуваною
+послідовністю — не «щось викликалось», а точний порядок.
+
+```
+request
+  │
+  ├─ HttpServer                  X-Request-Id, ALS-скоуп, parseBody
+  │   │
+  │   ├─ Middleware              consumer.apply() у Module.configure()
+  │   │   │
+  │   │   ├─ Guard               canActivate() → false / throw → 403
+  │   │   │   │
+  │   │   │   ├─ Interceptor     код «до»: старт таймера
+  │   │   │   │   │
+  │   │   │   │   ├─ Pipe        ZodValidationPipe → 400 зі списком полів
+  │   │   │   │   └─ Handler     метод контролера
+  │   │   │   │
+  │   │   │   └─ Interceptor     код «після»: бачить і час, і результат
+  │   │   │
+  │   │   └─ Middleware          продовження після `await next()`
+  │   │
+  │   └─ Exception filter        ловить усе, що кинуто вище
+  │
+response
+```
+
+Відступи — це не оформлення, а буквальна вкладеність: кожна стадія обгортає наступну.
+Тому інтерсептор трапляється в трасуванні двічі (вниз і вгору), а гвард — лише раз.
+
+| Стадія           | Файл                                   | Що може                                                                        | Чого не може                  |
+| ---------------- | -------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------- |
+| Middleware       | `src/dispatcher.ts`                    | обірвати запит, не викликавши `next()`; працює навіть коли маршрут не знайдено | повернути тіло відповіді      |
+| Guard            | `src/guards/`, `src/route-explorer.ts` | пустити або ні (`boolean` / `throw`)                                           | побачити чи змінити результат |
+| Interceptor      | `src/interceptors/`                    | обгорнути виклик, зміряти час, підмінити результат                             | вирішувати «пускати чи ні»    |
+| Pipe             | `src/pipes/`                           | перетворити й перевірити один аргумент                                         | бачити інші аргументи         |
+| Exception filter | `src/filters/`                         | перетворити будь-яку помилку на відповідь                                      | втрутитися до помилки         |
+
+Різниця між гвардом та інтерсептором зводиться до однієї сигнатури: гвард не отримує
+`next`, тому структурно не може виконати код після обробника і не бачить результату.
+Інтерсептор отримує `next` — звідси і «до», і «після», і можливість підмінити відповідь.
+
+Обробник маршруту — це **остання ланка** ланцюга middleware, як в Express. Тому
+`await next()` обов'язковий: без нього відповідь піде до того, як обробник відпрацює.
+
+### Чому AsyncLocalStorage, а не глобальна змінна
+
+`requestId` потрібен усюди — сервісу, репозиторію, логеру — але тягнути його параметром
+через кожен виклик означає засмітити всі сигнатури заради однієї наскрізної потреби.
+Спокуса — покласти його в модульну змінну:
+
+```ts
+let currentRequestId = ''; // так робити не можна
+```
+
+Це ламається на першому ж `await`. Node обробляє запити конкурентно в одному потоці: поки
+запит A чекає на базу, event loop встигає прийняти запит B і перезаписати `currentRequestId`.
+Коли A прокидається і йде логувати — там уже чужий id. Помилка не детермінована: під
+навантаженням логи тихо перемішуються, і саме тоді, коли вони найпотрібніші.
+
+`AsyncLocalStorage` прив'язує сховище не до модуля, а до **асинхронного контексту
+виконання**. `als.run(store, callback)` робить `store` видимим для `callback` і для всіх
+асинхронних продовжень, породжених усередині нього — на будь-якій глибині стека, скільки б
+запитів не виконувалось паралельно.
+
+```ts
+// src/context/request-context.ts
+static run<T>(store: RequestStore, callback: () => Promise<T>): Promise<T> {
+  return als.run(store, callback);
+}
+```
+
+Скоуп відкривається в `HttpServer` і охоплює весь запит — розбір тіла, диспетчеризацію,
+exception filter і запис відповіді. Тому `X-Request-Id` повертається навіть на 404 та на
+зламаному JSON, а `LoggerService` читає id без жодного параметра:
+
+```ts
+// src/services/logger.service.ts
+log(message: string) {
+  console.log(`[${RequestContext.requestId ?? 'no-request-context'}] ${message}`);
+}
+```
+
+Тест `test/request-context.test.ts` шле 10 одночасних запитів із різними `X-Request-Id` і
+перевіряє, що кожен бачить свій — і в заголовку відповіді, і двома рівнями глибше в стеку.
+Усередині сервісу стоїть `await`, щоб запити справді перемежовувалися: саме на цьому місці
+глобальна змінна б і зламалась.
 
 ### Як параметр-декоратор знає, куди підставити значення
 
 Параметр-декоратор отримує `(target, propertyKey, parameterIndex)` — і саме `parameterIndex`
 є ключем. `@Param('id')`, `@Query('limit')` та `@Body()` нічого не витягують самі: вони лише
 записують у метадані прототипу контролера мапу
-`{ [methodName]: { [parameterIndex]: { type, key } } }`.
+`{ [methodName]: { [parameterIndex]: { type, key, pipe } } }`.
 
-Під час запиту диспетчер бере цю мапу для знайденого обробника і будує масив аргументів за
-індексами: для `param` — значення з груп `URLPattern`, для `query` — з `searchParams`, для
-`body` — розпарсене тіло. Який саме клас DTO очікує метод, диспетчер дізнається з
-`design:paramtypes`, що його `emitDecoratorMetadata` записує для цього методу. Тому
-`@Body() dto: CreateUserDto` спершу проходить через `plainToInstance`, а потім через
-`class-validator`; якщо є помилки — відповідь `400` зі списком `[{ field, constraints }]`,
-інакше в метод приходить уже екземпляр DTO.
+Під час старту `createExtractor` перетворює цю мапу на масив замикань, індексований за
+позицією параметра: для `param` — читання з груп `URLPattern`, для `query` — з
+`searchParams`, для `body` — тіло цілком або один ключ (`@Body('name')`). Якщо до параметра
+прикріплено pipe, він теж прив'язується на цьому етапі. На запиті лишається виконати масив.
+
+Валідація — це pipe на Zod. Схема передається явно (`@Body(new ZodValidationPipe(schema))`),
+бо Zod-схема це значення, а не клас: `design:paramtypes` для типу-аліаса віддає `Object`, і
+відновити схему з анотації неможливо. Помилки групуються за шляхом поля і летять як
+`ValidationError` — фільтр перетворює її на `400` зі списком `[{ field, constraints }]`.
 
 ## Tokens
 
@@ -197,11 +292,11 @@ container refuses to construct.
 ## Binding
 
 ```ts
-container.bind(Token).to(Implementation);        // construct this class
-container.bind(Token).toConstantValue(value);    // hand back a fixed value
-container.bind(SomeClass).toSelf();              // construct the identifier itself
+container.bind(Token).to(Implementation); // construct this class
+container.bind(Token).toConstantValue(value); // hand back a fixed value
+container.bind(SomeClass).toSelf(); // construct the identifier itself
 container.bind(Token).setScope('transient').to(Impl);
-container.unbind(Token);                         // also drops the cached singleton
+container.unbind(Token); // also drops the cached singleton
 ```
 
 `bind()` returns a builder; the terminal call registers the binding. `setScope`
@@ -230,18 +325,27 @@ can be resolved.
 ## Project layout
 
 ```
-src/ioc/                       the IoC container from part 1
-src/decorators/controller.ts   @Controller(prefix)
-src/decorators/methods.ts      @Get / @Post / ...
-src/decorators/params.ts       @Body, @Param, @Query
-src/decorators/module.ts       @Module({ controllers })
-src/decorators/helpers.ts      composeClassDecorators
-src/router.ts                  route table and URLPattern matching
-src/dispatcher.ts              node:http layer
-src/pipes/validation.pipe.ts   DTO validation
-src/dto/create-user.dto.ts     DTO with class-validator rules
-src/types.ts                   shared types
-test/                          tests
+src/ioc/                          the IoC container from part 1
+src/decorators/controller.ts      @Controller(prefix)
+src/decorators/methods.ts         @Get / @Post / ...
+src/decorators/params.ts          @Body, @Param, @Query (+ pipes)
+src/decorators/module.ts          @Module({ controllers })
+src/decorators/use-guards.ts      @UseGuards
+src/decorators/use-interceptors.ts @UseInterceptors
+src/app-factory.ts                AppFactory.create, shutdown hooks
+src/server.ts                     node:http layer, ALS scope, response writing
+src/dispatcher.ts                 middleware chain + route terminal
+src/route-explorer.ts             builds one RouteHandler per route at boot
+src/router.ts                     route table and URLPattern matching
+src/guards/                       AuthGuard
+src/interceptors/                 LoggingInterceptor
+src/pipes/zod-validation.pipe.ts  Zod pipe
+src/filters/exception-filter.ts   HttpException hierarchy + filter
+src/context/request-context.ts    AsyncLocalStorage request scope
+src/services/logger.service.ts    reads requestId out of storage
+src/dto/create-user.dto.ts        Zod schema + inferred type
+src/types.ts                      shared types
+test/                             tests
 ```
 
 ## License
